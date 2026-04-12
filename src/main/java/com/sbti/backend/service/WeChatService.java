@@ -87,18 +87,17 @@ public class WeChatService {
         ObjectNode body = bodyMapper.createObjectNode();
         body.put("scene", scene != null ? scene : "sbti");
         
-        // Page must be a valid, published page path (without leading /)
-        String pagePath = page != null ? page : "pages/index/index";
-        if (pagePath.startsWith("/")) {
-            pagePath = pagePath.substring(1);
+        // Only include page if explicitly provided and non-empty
+        // WeChat API: if page is empty, defaults to homepage
+        if (page != null && !page.isEmpty() && !page.equals("pages/index/index")) {
+            String pagePath = page.startsWith("/") ? page.substring(1) : page;
+            body.put("page", pagePath);
         }
-        body.put("page", pagePath);
         
         body.put("width", Math.max(width, 280));
-        // Remove is_hyaline to avoid compatibility issues
-        // body.put("is_hyaline", true);
+        // Do NOT use is_hyaline - may cause issues
 
-        log.info("Generating QRCode: page={}, scene={}, width={}", pagePath, scene, width);
+        log.info("Generating QRCode: scene={}, width={}", scene, width);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
