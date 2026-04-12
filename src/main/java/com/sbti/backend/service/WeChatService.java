@@ -85,12 +85,20 @@ public class WeChatService {
         // Build request body using Jackson for proper JSON encoding
         ObjectMapper bodyMapper = new ObjectMapper();
         ObjectNode body = bodyMapper.createObjectNode();
-        body.put("scene", scene != null ? scene : "index");
-        body.put("page", page != null ? page : "pages/index/index");
+        body.put("scene", scene != null ? scene : "sbti");
+        
+        // Page must be a valid, published page path (without leading /)
+        String pagePath = page != null ? page : "pages/index/index";
+        if (pagePath.startsWith("/")) {
+            pagePath = pagePath.substring(1);
+        }
+        body.put("page", pagePath);
+        
         body.put("width", Math.max(width, 280));
-        body.put("is_hyaline", true);
+        // Remove is_hyaline to avoid compatibility issues
+        // body.put("is_hyaline", true);
 
-        log.info("Generating QRCode: page={}, scene={}, width={}", page, scene, width);
+        log.info("Generating QRCode: page={}, scene={}, width={}", pagePath, scene, width);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
