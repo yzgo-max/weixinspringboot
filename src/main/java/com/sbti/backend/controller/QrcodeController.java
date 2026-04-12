@@ -1,11 +1,19 @@
 package com.sbti.backend.controller;
 
 import com.sbti.backend.service.WeChatService;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+import lombok.Getter;
+import lombok.Setter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
@@ -32,7 +40,7 @@ public class QrcodeController {
     }
 
     @PostMapping(value = "/qrcode", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<Map<String, Object>> generateQrCode(@RequestBody QrcodeRequest request) {
+    public ResponseEntity<Map<String, Object>> generateQrCode(@Valid @RequestBody QrcodeRequest request) {
         Map<String, Object> result = new HashMap<>();
 
         try {
@@ -61,11 +69,20 @@ public class QrcodeController {
         }
     }
 
+    @Data
+    @Getter
+    @Setter
     public static class QrcodeRequest {
         private String page = "pages/index/index";
+        
+        @NotBlank(message = "scene 不能为空")
         private String scene = "index";
+        
+        @Min(280)
+        @Max(1280)
         private int width = 280;
-
+        
+        // Explicit getters for safety
         public String getPage() { return page; }
         public void setPage(String page) { this.page = page; }
         public String getScene() { return scene; }

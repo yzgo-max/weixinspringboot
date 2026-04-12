@@ -1,60 +1,78 @@
 package com.sbti.backend.service;
 
 import com.sbti.backend.config.WeChatConfig;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 
 @Service
 public class WeChatService {
 
     private static final Logger log = LoggerFactory.getLogger(WeChatService.class);
+    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     private final WeChatConfig weChatConfig;
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
 
-    private String cachedAccessToken;
-    private long tokenExpireTime = 0;
+    private volatile String cachedAccessToken;
+    private volatile long tokenExpireTime = 0;
 
-    public WeChatService(WeChatConfig weChatConfig) {
+    public WeChatService(WeChatConfig weChatConfig, RestTemplate restTemplate) {
         this.weChatConfig = weChatConfig;
+        this.restTemplate = restTemplate;
     }
 
     /**
      * Get access_token with caching (valid for ~2h from WeChat)
      */
-    public synchronized String getAccessToken() {
+    public String getAccessToken() {
         long now = System.currentTimeMillis();
         if (cachedAccessToken != null && now < tokenExpireTime) {
             return cachedAccessToken;
         }
 
-        String url = String.format(
-            "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=%s&secret=%s",
-            weChatConfig.getAppId(),
-            weChatConfig.getAppSecret()
-        );
-
-        log.info("Requesting new access_token...");
-        try {
-            String response = restTemplate.getForObject(url, String.class);
-
-            String token = extractJsonField(response, "access_token");
-            if (token == null || token.isEmpty()) {
-                log.error("Failed to get access_token: {}", response);
-                throw new RuntimeException("获取access_token失败: " + response);
+        synchronized (this) {
+            // Double-check after acquiring lock
+            if (cachedAccessToken != null && now < tokenExpireTime) {
+                return cachedAccessToken;
             }
 
-            int expiresIn = Integer.parseInt(extractJsonField(response, "expires_in", "7200"));
-            cachedAccessToken = token;
-            tokenExpireTime = now + (expiresIn - 300) * 1000L;
+            String url = String.format(
+                "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=%s&secret=%s",
+                weChatConfig.getAppId(),
+                weChatConfig.getAppSecret()
+            );
 
-            log.info("Access_token obtained successfully, expires in {}s", expiresIn);
-            return cachedAccessToken;
-        } catch (Exception e) {
-            log.error("Error getting access_token", e);
-            throw new RuntimeException("获取access_token异常: " + e.getMessage(), e);
+            log.info("Requesting new access_token...");
+            try {
+                String response = restTemplate.getForObject(url, String.class);
+
+                JsonNode json = objectMapper.readTree(response);
+                String token = json.path("access_token").asText();
+                if (token == null || token.isEmpty()) {
+                    log.error("Failed to get access_token: {}", response);
+                    throw new RuntimeException("获取access_token失败: " + response);
+                }
+
+                int expiresIn = json.path("expires_in").asInt(7200);
+                cachedAccessToken = token;
+                tokenExpireTime = now + (expiresIn - 300) * 1000L;
+
+                log.info("Access_token obtained successfully, expires in {}s", expiresIn);
+                return cachedAccessToken;
+            } catch (Exception e) {
+                log.error("Error getting access_token", e);
+                throw new RuntimeException("获取access_token异常: " + e.getMessage(), e);
+            }
         }
     }
 
@@ -64,21 +82,22 @@ public class WeChatService {
     public byte[] generateQRCode(String accessToken, String page, String scene, int width) throws Exception {
         String url = "https://api.weixin.qq.com/wxa/getunlimited?access_token=" + accessToken;
 
-        StringBuilder body = new StringBuilder("{");
-        body.append("\"scene\":\"").append(scene != null ? scene : "index").append("\",");
-        body.append("\"page\":\"").append(page != null ? page : "pages/index/index").append("\",");
-        body.append("\"width\":").append(width > 0 ? width : 280).append(",");
-        body.append("\"is_hyaline\":true");
-        body.append("}");
+        // Build request body using Jackson for proper JSON encoding
+        ObjectMapper bodyMapper = new ObjectMapper();
+        ObjectNode body = bodyMapper.createObjectNode();
+        body.put("scene", scene != null ? scene : "index");
+        body.put("page", page != null ? page : "pages/index/index");
+        body.put("width", Math.max(width, 280));
+        body.put("is_hyaline", true);
 
         log.info("Generating QRCode: page={}, scene={}, width={}", page, scene, width);
 
-        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
-        headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
-        org.springframework.http.HttpEntity<String> entity = new org.springframework.http.HttpEntity<>(body.toString(), headers);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<String> entity = new HttpEntity<>(bodyMapper.writeValueAsString(body), headers);
 
-        org.springframework.http.ResponseEntity<byte[]> response = restTemplate.exchange(
-            url, org.springframework.http.HttpMethod.POST, entity, byte[].class
+        ResponseEntity<byte[]> response = restTemplate.exchange(
+            url, HttpMethod.POST, entity, byte[].class
         );
 
         byte[] imageBytes = response.getBody();
@@ -86,7 +105,7 @@ public class WeChatService {
             throw new RuntimeException("微信API返回空数据");
         }
 
-        // Check error response
+        // Check error response (WeChat API returns JSON error starting with '{')
         if (imageBytes[0] == '{') {
             String errorMsg = new String(imageBytes, "UTF-8");
             log.error("WeChat API error: {}", errorMsg);
@@ -95,30 +114,5 @@ public class WeChatService {
 
         log.info("QRCode generated successfully, size={} bytes", imageBytes.length);
         return imageBytes;
-    }
-
-    private String extractJsonField(String json, String key) {
-        return extractJsonField(json, key, "");
-    }
-
-    private String extractJsonField(String json, String key, String defaultValue) {
-        String searchKey = "\"" + key + "\":";
-        int start = json.indexOf(searchKey);
-        if (start < 0) return defaultValue;
-        start += searchKey.length();
-        if (start >= json.length()) return defaultValue;
-
-        char ch = json.charAt(start);
-        if (ch == '"') {
-            int end = json.indexOf('"', start + 1);
-            if (end < 0) return defaultValue;
-            return json.substring(start + 1, end);
-        } else {
-            int end = start;
-            while (end < json.length() && (Character.isDigit(json.charAt(end)) || json.charAt(end) == '-')) {
-                end++;
-            }
-            return json.substring(start, end);
-        }
     }
 }
