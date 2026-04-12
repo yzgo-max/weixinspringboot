@@ -15,6 +15,6 @@ WORKDIR /app
 
 COPY --from=builder /app/target/weixinspringboot-1.0.0.jar app.jar
 
-EXPOSE 8080
+EXPOSE 80
 
 ENTRYPOINT ["java", "-jar", "app.jar"]
