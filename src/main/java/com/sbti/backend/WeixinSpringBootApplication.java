@@ -9,7 +9,7 @@ public class WeixinSpringBootApplication {
         SpringApplication.run(WeixinSpringBootApplication.class, args);
         System.out.println("========================================");
         System.out.println("  WeChat SpringBoot started on port 8080");
-        System.out.println("  QRCode API: POST /api/qrcode");
+        System.out.println("  QRCode API: POST /api/qrcode (static image/png)");
         System.out.println("  Health:     GET /api/health");
         System.out.println("========================================");
     }

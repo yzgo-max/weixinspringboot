@@ -1,6 +1,5 @@
 package com.sbti.backend.controller;
 
-import com.sbti.backend.service.WeChatService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -10,11 +9,12 @@ import lombok.Getter;
 import lombok.Setter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Base64;
+import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -23,12 +23,6 @@ import java.util.Map;
 public class QrcodeController {
 
     private static final Logger log = LoggerFactory.getLogger(QrcodeController.class);
-
-    private final WeChatService weChatService;
-
-    public QrcodeController(WeChatService weChatService) {
-        this.weChatService = weChatService;
-    }
 
     @GetMapping("/health")
     public ResponseEntity<Map<String, Object>> health() {
@@ -39,33 +33,18 @@ public class QrcodeController {
         return ResponseEntity.ok(result);
     }
 
-    @PostMapping(value = "/qrcode", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<Map<String, Object>> generateQrCode(@Valid @RequestBody QrcodeRequest request) {
-        Map<String, Object> result = new HashMap<>();
-
+    @PostMapping(value = "/qrcode", produces = MediaType.IMAGE_PNG_VALUE)
+    public ResponseEntity<byte[]> generateQrCode(@Valid @RequestBody QrcodeRequest request) {
         try {
-            String accessToken = weChatService.getAccessToken();
-
-            byte[] imageData = weChatService.generateQRCode(
-                accessToken,
-                request.getPage(),
-                request.getScene(),
-                request.getWidth()
-            );
-
-            String base64Image = Base64.getEncoder().encodeToString(imageData);
-
-            result.put("success", true);
-            result.put("buffer", "data:image/png;base64," + base64Image);
-
-            log.info("QRCode generated successfully for page={}", request.getPage());
-            return ResponseEntity.ok(result);
-
+            ClassPathResource imageResource = new ClassPathResource("static/images/qrcode.png");
+            try (InputStream is = imageResource.getInputStream()) {
+                byte[] imageBytes = is.readAllBytes();
+                log.info("QRCode static image returned for page={}, scene={}", request.getPage(), request.getScene());
+                return ResponseEntity.ok().contentType(MediaType.IMAGE_PNG).body(imageBytes);
+            }
         } catch (Exception e) {
-            log.error("Failed to generate QRCode: {}", e.getMessage(), e);
-            result.put("success", false);
-            result.put("error", e.getMessage());
-            return ResponseEntity.internalServerError().body(result);
+            log.error("Failed to read QRCode image: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
         }
     }
 
